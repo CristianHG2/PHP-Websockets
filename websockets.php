@@ -69,7 +69,7 @@ abstract class WebSocketServer {
       }
       if (!$found) {
         // If they're no longer in the list of connected users, drop the message.
-        unset($this->heldMessages[$key];
+        unset($this->heldMessages[$key]);
       }
     }
   }
@@ -133,6 +133,7 @@ abstract class WebSocketServer {
             $user = $this->getUserBySocket($socket);
             if (!$user->handshake) {
               $tmp = str_replace("\r", '', $buffer);
+              $this->dumpBin($buffer);
               if (strpos($tmp, "\n\n") === false ) {
                 continue; // If the client has not finished sending the header, then wait before sending our upgrade response.
               }
@@ -146,6 +147,46 @@ abstract class WebSocketServer {
         }
       }
     }
+  }
+
+  protected function dumpBin($message)
+  {
+    $lineOut = '';
+    for ($i = 0; $i < strlen($message); $i++)
+    {
+      $valAt = ord($message[$i]);
+      printf("%02x ", $valAt);
+      
+      if ($valAt >= 32 && $valAt !== 127)
+      {
+        $lineOut .= chr($valAt);
+      }
+      else
+      {
+        $lineOut .= '.';
+      }
+      
+      if ($i % 16 == 7)
+      {
+        echo '  ';
+        $lineOut .= ' ';
+      }
+
+      if ($i % 16 == 15)
+      {
+        echo '   ' . $lineOut . PHP_EOL;
+        $lineOut = '';
+      }
+    }
+
+    $remainder = (($i % 16) - 16) * (-1);
+    $padding = ($remainder * 3) + 3;
+    if ($remainder > 8)
+    {
+      $padding += 3;
+    }
+
+    echo str_repeat(' ', $padding) . $lineOut . PHP_EOL;
   }
 
   protected function connect($socket) {
