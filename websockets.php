@@ -2,6 +2,7 @@
 
 //require_once('./daemonize.php');
 require_once('./users.php');
+require_once('./message.php');
 
 abstract class WebSocketServer {
 
@@ -40,7 +41,7 @@ abstract class WebSocketServer {
   protected function send($user, $message) {
     if ($user->handshake) {
       $message = $this->frame($message,$user);
-      $result = @socket_write($user->socket, $message, strlen($message));
+      $result = @socket_write($user->socket, $message, mb_strlen($message, '8bit'));
     }
     else {
       // User has not yet performed their handshake.  Store for sending later.
@@ -152,7 +153,7 @@ abstract class WebSocketServer {
   protected function dumpBin($message)
   {
     $lineOut = '';
-    for ($i = 0; $i < strlen($message); $i++)
+    for ($i = 0; $i < mb_strlen($message, '8bit'); $i++)
     {
       $valAt = ord($message[$i]);
       printf("%02x ", $valAt);
@@ -216,7 +217,7 @@ abstract class WebSocketServer {
       }
       else {
         $message = $this->frame('', $disconnectedUser, 'close');
-        @socket_write($disconnectedUser->socket, $message, strlen($message));
+        @socket_write($disconnectedUser->socket, $message, mb_strlen($message, '8bit'));
       }
     }
   }
@@ -273,7 +274,7 @@ abstract class WebSocketServer {
     // Done verifying the _required_ headers and optionally required headers.
 
     if (isset($handshakeResponse)) {
-      socket_write($user->socket,$handshakeResponse,strlen($handshakeResponse));
+      socket_write($user->socket, $handshakeResponse, mb_strlen($handshakeResponse, '8bit'));
       $this->disconnect($user->socket);
       return;
     }
@@ -293,7 +294,7 @@ abstract class WebSocketServer {
     $extensions = (isset($headers['sec-websocket-extensions'])) ? $this->processExtensions($headers['sec-websocket-extensions']) : "";
 
     $handshakeResponse = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: $handshakeToken$subProtocol$extensions\r\n";
-    socket_write($user->socket,$handshakeResponse,strlen($handshakeResponse));
+    socket_write($user->socket, $handshakeResponse, mb_strlen($handshakeResponse, '8bit'));
     $this->connected($user);
   }
 
@@ -376,7 +377,7 @@ abstract class WebSocketServer {
       $user->sendingContinuous = false;
     }
 
-    $length = strlen($message);
+    $length = mb_strlen($message, '8bit');
     $lengthField = "";
     if ($length < 126) {
       $b2 = $length;
@@ -385,30 +386,30 @@ abstract class WebSocketServer {
       $b2 = 126;
       $hexLength = dechex($length);
       //$this->stdout("Hex Length: $hexLength");
-      if (strlen($hexLength)%2 == 1) {
+      if (mb_strlen($hexLength, '8bit') % 2 == 1) {
         $hexLength = '0' . $hexLength;
       } 
-      $n = strlen($hexLength) - 2;
+      $n = mb_strlen($hexLength, '8bit') - 2;
 
       for ($i = $n; $i >= 0; $i=$i-2) {
         $lengthField = chr(hexdec(substr($hexLength, $i, 2))) . $lengthField;
       }
-      while (strlen($lengthField) < 2) {
+      while (mb_strlen($lengthField, '8bit') < 2) {
         $lengthField = chr(0) . $lengthField;
       }
     } 
     else {
       $b2 = 127;
       $hexLength = dechex($length);
-      if (strlen($hexLength)%2 == 1) {
+      if (mb_strlen($hexLength, '8bit') % 2 == 1) {
         $hexLength = '0' . $hexLength;
       } 
-      $n = strlen($hexLength) - 2;
+      $n = mb_strlen($hexLength, '8bit') - 2;
 
       for ($i = $n; $i >= 0; $i=$i-2) {
         $lengthField = chr(hexdec(substr($hexLength, $i, 2))) . $lengthField;
       }
-      while (strlen($lengthField) < 8) {
+      while (mb_strlen($lengthField, '8bit') < 8) {
         $lengthField = chr(0) . $lengthField;
       }
     }
@@ -422,7 +423,7 @@ abstract class WebSocketServer {
     if ($user->handlingPartialPacket) {
       $packet = $user->partialBuffer . $packet;
       $user->handlingPartialPacket = false;
-      $length=strlen($packet);
+      $length = mb_strlen($packet, '8bit');
     }
     $fullpacket=$packet;
     $frame_pos=0;
@@ -513,7 +514,7 @@ abstract class WebSocketServer {
 
     if ($pongReply) {
       $reply = $this->frame($payload,$user,'pong');
-      socket_write($user->socket,$reply,strlen($reply));
+      socket_write($user->socket, $reply, mb_strlen($reply, '8bit'));
       return false;
     }
     if (extension_loaded('mbstring')) {
