@@ -596,16 +596,20 @@ abstract class WebSocketServer {
   }
 
   protected function applyMask($headers,$payload) {
-    $effectiveMask = "";
     if ($headers['hasmask']) {
       $mask = $headers['mask'];
-    } 
+    }
     else {
       return $payload;
     }
 
-    while (strlen($effectiveMask) < strlen($payload)) {
+    $effectiveMask = "";
+    $curMaskLength = 0;
+    $payloadLength = strlen($payload);
+
+    while ($curMaskLength < $payloadLength) {
       $effectiveMask .= $mask;
+      $curMaskLength += 4;
     }
     while (strlen($effectiveMask) > strlen($payload)) {
       $effectiveMask = substr($effectiveMask,0,-1);
