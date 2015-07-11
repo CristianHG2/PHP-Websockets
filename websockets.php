@@ -596,14 +596,6 @@ abstract class WebSocketServer {
     }
 
     $effectiveMask = "";
-<<<<<<< HEAD
-    $curMaskLength = 0;
-    $payloadLength = strlen($payload);
-
-    while ($curMaskLength < $payloadLength) {
-      $effectiveMask .= $mask;
-      $curMaskLength += 4;
-=======
     $payloadLength = strlen($payload);
     $maskLength = strlen($mask); // By standard, always 4 bytes, but the standard may change some day.  Probably won't change, but it may.
     $effectiveMaskLength = 0;
@@ -611,7 +603,6 @@ abstract class WebSocketServer {
     while ($effectiveMaskLength < $payloadLength) {
       $effectiveMask .= $mask;
       $effectiveMaskLength += $maskLength;
->>>>>>> dev-legacy
     }
 
     while (strlen($effectiveMask) > strlen($payload)) {
