@@ -1,6 +1,15 @@
 <?php
 
-class IncomingMessage {
+class MessageTypes {
+	const CONTINUATION_FRAME = 0;
+	const TEXT_FRAME = 1;
+	const BINARY_FRAME = 2;
+	const CLOSE_FRAME = 8;
+	const PING = 9;
+	const PONG = 10;
+}
+
+class IncomingMessageQueue {
 
 	const MESSAGE_NEW = 1;
 	const MESSAGE_FRAGMENTED = 2;
@@ -76,11 +85,34 @@ class IncomingMessage {
 		try
 		{
 			$frame = new Frame($tcpPacket);
+			if ($frame->getMessageType() < MessageTypes::CLOSE_FRAME) {
+				$this->contents[] = $frame;
+
+				if ($frame->getIsFinal()) {
+					$wholeMessage = '';
+
+					/** @var Frame $message */
+					foreach ($this->contents as $message)
+					{
+						$wholeMessage .= $message->getPayload();
+					}
+
+					foreach ($this->messageHandler as $handler) {
+						call_user_func($handler, $wholeMessage);
+					}
+
+					$this->contents = array();
+				}
+			}
+			else {
+
+			}
+
 		}
 		catch (Exception $e)
 		{
 			$disconnectMessage = new OutgoingMessage();
-			$disconnectMessage->setType(OutgoingMessage::ControlFrame);
+			$disconnectMessage->setType(OutgoingMessage::CLOSE_FRAME);
 		}
 
 
@@ -98,54 +130,86 @@ class IncomingMessage {
 }
 
 class OutgoingMessage {
+	private $messageType;
+	private $message;
 	private $recipients;
+	private $options;
 
-	function __construct($recipients = array())
+	const CONTINUATION_FRAME = 0;
+	const TEXT_FRAME = 1;
+	const BINARY_FRAME = 2;
+	const CLOSE_FRAME = 8;
+	const PING = 9;
+	const PONG = 10;
+
+	function __construct(array $recipients = array(), $message = '', array $options = array())
 	{
+		$this->messageType = self::TEXT_FRAME;
+		$this->recipients = $recipients;
+		$this->options = $options;
+		$this->message = $message;
+	}
 
+	function setType($messageType)
+	{
+		$this->messageType = $messageType;
 	}
 
 }
 
 class Frame {
+	/** @var string The raw buffer. */
 	private $buffer;
+	/** @var bool Whether to expect a continuation frame after this one. */
 	private $finIsSet = false;
+	/** @var int The message type: 0 = continuation; 1 = text; 2 = binary; 8 = close; 9 = ping; 10 = pong */
 	private $opcode;
+	/** @var bool Whether the mask is set. Should always be true. */
 	private $maskIsSet = false;
+	/** @var int The number of bytes in the payload. Note: not the same as number of characters, in case of a multibyte character set. */
 	private $payloadLength;
+	/** @var string The mask. */
 	private $maskKey;
+	/** @var bool Reserved bit 1 */
 	private $rsv1;
+	/** @var bool Reserved bit 2 */
 	private $rsv2;
+	/** @var bool Reserved bit 3 */
 	private $rsv3;
+	/** @var string The message, unmasked and ready for consumption. */
 	private $payload;
-	private $overflow;
 
+	/**
+	 * @param string $buffer The raw message from the TCP layer.
+	 * @throws Exception
+	 */
 	function __construct($buffer) {
 		$this->buffer = $buffer;
 		$payloadOffset = 1; // Always will be more, because the mask bit will always be set, but we always start at the minimum.
 		                    // Also, it's zero based.
 
-		// First byte: fin{1}, rsv1{1}, rsv2{1}, rsv3{1}, opcode{4}
-		$firstByte = decbin(chr($buffer[0]));
-		$bit = array_shift($firstByte);
-		if ($bit === '1') {
+		// chr(128) == b 1000 0000
+		if (ord($buffer[0] & chr(128))) {
 			$this->finIsSet = true;
 		}
 
-		$this->rsv1 = array_shift($firstByte);
-		$this->rsv2 = array_shift($firstByte);
-		$this->rsv3 = array_shift($firstByte);
+		// chr(64) == b 0100 0000
+		$this->rsv1 = (ord($buffer[0] & chr(64))) != 0;
+		// chr(32) == b 0010 0000
+		$this->rsv2 = (ord($buffer[0] & chr(32))) != 0;
+		// chr(16) == b 0001 0000
+		$this->rsv3 = (ord($buffer[0] & chr(16))) != 0;
 
-		$this->opcode = bindec($firstByte);
+		// chr(15) == b 0000 1111
+		$this->opcode = ord($buffer[0] & chr(15));
 
-		// Second byte: mask{1}, length{7}
-		$secondByte = decbin(chr($buffer[1]));
-		$bit = array_shift($secondByte);
-		if ($bit === '1') { // Should always be true, because the mask should always be set.
+		if ($buffer[1] & chr(128)) { // Should always be true, because the mask should always be set.
 			$this->maskIsSet = true;
 			$payloadOffset += 4;
 		}
-		$this->payloadLength = bindec($secondByte);
+
+		// chr(127) == b 0111 1111
+		$this->payloadLength = ord($buffer[1] & chr(127));
 		if ($this->payloadLength === 126) {
 			// Note the bitwise OR, not logical OR.
 			$this->payloadlength = ord($buffer[2]) << 8 | ord($buffer[3]);
@@ -191,5 +255,76 @@ class Frame {
 			}
 			$this->payload = $effectiveMask ^ $this->payload;
 		}
+	}
+
+	/**
+	 * Returns the unmasked, prepared message as sent by the client.
+	 *
+	 * @return string
+	 */
+	public function getPayload() {
+		return $this->payload;
+	}
+
+	/**
+	 * Returns the number of bytes in the message.  Note: This is not necessarily the number of characters, in the case of multibyte character sets.
+	 *
+	 * @return int
+	 */
+	public function getPayloadLength() {
+		return $this->payloadLength;
+	}
+
+	/**
+	 * Returns whether this is the last frame is a series of messages.
+	 *
+	 * @return bool
+	 */
+	public function getIsFinal() {
+		return $this->finIsSet;
+	}
+
+	/**
+	 * Returns the message type as an integer, based on the definition in the standard.
+	 *
+	 * 0: Continuation frame
+	 * 1: Text frame
+	 * 2: Binary frame
+	 * 8: Close request
+	 * 9: Ping
+	 * 10: Pong
+	 *
+	 * @return int
+	 */
+    public function getMessageType() {
+		return $this->opcode;
+	}
+
+	/**
+	 * Returns whether the selected bit is set.
+	 *
+	 * @param int $bit The bit to select.
+	 * @return bool
+	 */
+	public function getReservedBit($bit) {
+		switch ($bit) {
+			case 1:
+				return $this->rsv1;
+			case 2:
+				return $this->rsv2;
+			case 3:
+				return $this->rsv3;
+			default:
+				return false;
+		}
+	}
+
+	/**
+	 * Gets the raw message, not unmasked and with the frame, as it was received from the TCP layer.
+	 *
+	 * @return string
+	 */
+	public function getBuffer() {
+		return $this->buffer;
 	}
 }

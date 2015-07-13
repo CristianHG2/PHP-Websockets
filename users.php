@@ -15,8 +15,19 @@ class WebSocketUser {
   
   public $hasSentClose = false;
 
+  private $messageQueue;
+
   function __construct($id, $socket) {
+    $this->messageQueue = new IncomingMessageQueue($this, array($this, 'handleMessage'));
     $this->id = $id;
     $this->socket = $socket;
+  }
+
+  public function handleMessage($message) {
+
+  }
+
+  public function receiveMessage($buffer) {
+    $this->messageQueue->receiveFrame($buffer);
   }
 }
